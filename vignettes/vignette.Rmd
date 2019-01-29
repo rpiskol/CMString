@@ -1,0 +1,214 @@
+---
+title: "CMString: a custom disease-focused NanoString based CMS classifier"
+author: "Robert Piskol"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+Four consensus molecular subtypes (CMS1-4) of colorectal cancer (CRC) defined by gene expression in mostly primary, early-stage tumors were identified and found to be associated with distinctive biological features and clinical outcomes. Given that distant metastasis largely accounts for CRC-related mortality, we sought to examine the molecular and clinical attributes of CMS in metastatic CRC (mCRC).
+
+We have developed a custom disease-focused NanoString based CMS classifier that is ideally suited to interrogate archival tissues. Here we show how to apply this classifier to a set of early stage patient samples from the CIT data set as well as primary and metastatic samples from a procured set of patients with late stage disease.
+
+This vignette is available by typing:
+```
+vignette(package = "CMString", topic = "vignette")
+```
+
+## Installation
+Please follow the following instructions to install the package:
+
+```
+install.packages("devtools")
+devtools::install_github("rpiskol/CMString")
+```
+
+Load the package once it is installed:
+
+```{r, message=FALSE, warning=FALSE}
+library(CMString)
+library(Biobase)
+```
+
+
+## Available data sets and their retrieval 
+
+Available data sets can be shown using the `showAvailableExpressionDataSets` function:
+
+```{r}
+showAvailableExpressionDataSets()
+```
+
+Each of them can be loaded using the `getExpressionDataSet` function, which returns an `ExpressionSet` that contains the expression data as well as pheno data
+```{r}
+CIT.eset <- getExpressionDataSet(dataset = "CIT")
+
+CIT.eset
+
+head(pData(CIT.eset), n=2)
+```
+
+
+## CMS classification of CIT data
+
+CMS classification can be performed using the `classifyCMString` function. The `thresh` parameter specifies the minimum confidence level to assign a CMS to a sample (e.g. the higher the `thresh` parameter, the higher the confidence has to be for assignment):
+```{r}
+classification <- classifyCMString(CIT.eset, thresh = .4)
+```
+
+
+The resulting classification contains the predicted CMS subtypes and their probabilities.
+```{r}
+table(classification$clu.pred)
+
+head(classification$pred)
+```
+
+
+We can add the predicted CMS subtypes back to the pheno data:
+```{r}
+CMS.glmnet <- classification$clu.pred[sampleNames(CIT.eset)]
+CIT.eset$CMS.glmnet <- ifelse(is.na(CMS.glmnet), "UNK", 
+                                                 paste0("CMS",CMS.glmnet))
+```
+
+
+The distribution of CMS subtypes can be plotted as a pie chart:
+```{r, fig.height=5, fig.width=5, fig.align = "center"}
+pieChart(pData(CIT.eset), digits = 2)
+```
+
+###
+The predicted CMS types can be compared to the "Gold Standard" Network classification by Guinney et al ([see here](https://www.ncbi.nlm.nih.gov/pubmed/26457759)) using the `plotContingencyGeneral` function:
+```{r, fig.height=5, fig.width=5, fig.align = "center"}
+plotContingencyGeneral(CIT.eset$CMS.glmnet,
+                       CIT.eset$CMS_network,
+                       xlab="CMString Classification",
+                       ylab="Gold Standard Classification",
+                       main = "CIT")
+```
+
+###
+The classification and expression data can also be plotted as a heat map with CMS annotation and prediction probabilties using the `figClassifyCMS` function:
+```{r, fig.height=6, fig.width=5, fig.align = "center"}
+figClassifyCMS(x=classification)
+```
+
+Gene and sample names can be toggled on/off:
+```{r, fig.height=6, fig.width=5, fig.align = "center"}
+figClassifyCMS(x=classification,gene.labs = FALSE, samp.labs = FALSE)
+```
+
+
+Instead of providing the result of the clustering procedure, also each element of the clustering result can be provided separately.
+This allows to modify the ordering of genes (determined by the hierarchical clustering in `gclus.f`) or samples (determined by `nam.ord`)
+
+```{r, fig.height=6, fig.width=5, fig.align = "center"}
+figClassifyCMS(pred = classification$pred, 
+               clu.pred = classification$clu.pred, 
+               sdat.sig = classification$sdat.sig,
+               gclu.f = rev(classification$gclu.f), 
+               nam.ord = rev(classification$nam.ord), 
+               missing.genes = classification$missing.genes,
+               cex.axis.labs = 0.5, gene.labs = FALSE,samp.labs = FALSE)
+```
+
+
+## CMS classification of Procured samples
+
+Our procured data set from late stage CRC patients consist of 312 samples. These include 182 primary samples and 130 metastases. The samples have been profiled using a custom probe set that allows to determine the expression of ~800 disease related genes. 
+
+```{r}
+Procured.eset <- getExpressionDataSet(dataset = "Procured")
+
+table(Procured.eset$Type)
+```
+
+We can use either gene symbols or Entrez gene IDs for classification. In addition, the classification function accepts not only ExpressionSets but also gene expression matrices and data frames as input.
+
+```{r}
+# classification using Entrez IDs
+Procured.exprs.entrez <- exprs(Procured.eset)
+rownames(Procured.exprs.entrez) <- fData(Procured.eset)$Entrez
+Procured.classification.entrez <- classifyCMString(Procured.exprs.entrez, thresh=.5)
+
+# classification using Symbols
+Procured.exprs.symbol <- exprs(Procured.eset)
+rownames(Procured.exprs.symbol) <- fData(Procured.eset)$Symbol
+Procured.classification.symbol <- classifyCMString(Procured.exprs.symbol, thresh=.5)
+
+xtabs(~Procured.classification.symbol$clu.pred + Procured.classification.entrez$clu.pred)
+```
+
+As previously, a pie chart of CMS distributions and heatmap can be generated:
+```{r, fig.height=5, fig.width=4, fig.align = "center", fig.show='hold'}
+CMS.glmnet <- Procured.classification.entrez$clu.pred[sampleNames(Procured.eset)]
+Procured.eset$CMS.glmnet <- ifelse(is.na(CMS.glmnet), "UNK", paste0("CMS",CMS.glmnet))
+
+# plot pie chart
+pieChart(pData(Procured.eset), digits = 0)
+# plot heatmap for all samples
+figClassifyCMS(x=Procured.classification.entrez,gene.labs = FALSE, samp.labs = FALSE)
+
+
+```
+
+We can discard low-confidence predictions using the `subsetSamplesBySignificance` function:
+
+```{r}
+Procured.classification.entrez.highConf <- subsetSamplesBySignificance(Procured.classification.entrez, thresh=.5)
+```
+
+Given that the Procured data set contains primary samples and metastases it might be desirable to separate predictions into these two. This can be achieved using the `subsetSamplesByName` function:
+
+```{r, fig.height=5, fig.width=3, fig.align = "center", fig.show='hold'}
+sampids.primary <- Procured.eset$Sample[which(Procured.eset$Type == "Primary")]
+sampids.met <- Procured.eset$Sample[which(Procured.eset$Type == "Met")]
+
+Procured.classification.entrez.primary <- subsetSamplesByName(Procured.classification.entrez, 
+                                                              sampids.primary)
+Procured.classification.entrez.met <- subsetSamplesByName(Procured.classification.entrez, 
+                                                          sampids.met)
+
+# plot heatmap for primary samples
+figClassifyCMS(x=Procured.classification.entrez.primary, gene.labs = FALSE)
+# plot heatmap for metastases
+figClassifyCMS(x=Procured.classification.entrez.met, gene.labs = FALSE)
+
+```
+
+## Retrieval of classifier features
+
+Classifier features can be retrieved individually for each sybtype using the `getSignatureGenesPerCMS` function. If desired, they can then be combined into one list. Furthermore, features can be retrieved either in form of Entrez gene IDs or gene symbols.
+```{r}
+
+# as Entrez IDs
+ids.entrez <- lapply(1:4,function(i){getSignatureGenesPerCMS(i, "Entrez" ,"lambda.min")})
+
+# as Symbols
+ids.symbol <- lapply(1:4,function(i){getSignatureGenesPerCMS(i, "Symbol" ,"lambda.min")})
+
+sapply(ids.entrez, length)
+sapply(ids.symbol, length)
+
+length(unique(unlist(ids.symbol)))
+sort(unique(unlist(ids.symbol)))
+
+
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+
